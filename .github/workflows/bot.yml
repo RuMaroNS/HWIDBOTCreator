@@ -1,0 +1,35 @@
+name: Eternal Telegram Bot
+
+on:
+  push:
+    branches: [ main, master ]
+  schedule:
+    # Перезапуск каждые 3 часа (0, 3, 6, 9, 12, 15, 18, 21 UTC)
+    - cron: '0 */3 * * *'
+  workflow_dispatch: # Позволяет запускать вручную из панели GitHub
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 18
+
+    - name: Install dependencies
+      run: npm install telegraf @supabase/supabase-js
+
+    - name: Run Telegram Bot with Timeout
+      env:
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      # Бот работает ровно 2 часа 55 минут, затем мягко завершается, а cron запускает его снова
+      run: |
+        timeout 10500s node index.js || true
+        
