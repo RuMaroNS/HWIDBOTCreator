@@ -31,7 +31,6 @@ async function isAdmin(userId, username) {
 function generateKey() {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     const genPart = (len) => Array.from({length: len}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-    // Генерирует полностью уникальную комбинацию без статичных слов вроде HWID-TEST
     return `${genPart(4)}-${genPart(4)}-${genPart(4)}-${genPart(4)}`;
 }
 
@@ -324,12 +323,8 @@ bot.action(/^page_(.+)$/, async (ctx) => {
     ctx.answerCbQuery();
 });
 
-// Просмотр детальной информации о ключе
-bot.action(/^view_key_(.+)_(.+)$/, async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
-    const keyId = ctx.match[1];
-    const backPage = parseInt(ctx.match[2]);
-
+// Изолированная функция для рендеринга и обновления информации о конкретном ключе
+async function renderSingleKey(ctx, keyId, backPage) {
     const { data } = await supabase.from('keys').select('*').eq('id', keyId);
     if (!data || data.length === 0) {
         return ctx.answerCbQuery("Ключ не найден.", { show_alert: true });
@@ -358,11 +353,21 @@ bot.action(/^view_key_(.+)_(.+)$/, async (ctx) => {
         [Markup.button.callback("⬅️ Вернуться к списку", `page_${backPage}`)]
     ]);
 
-    ctx.editMessageText(details, { parse_mode: 'Markdown', ...actions });
+    // Всегда обновляем текущее инлайн-сообщение без сбоев
+    return ctx.editMessageText(details, { parse_mode: 'Markdown', ...actions });
+}
+
+// Просмотр детальной информации о ключе
+bot.action(/^view_key_(.+)_(.+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    const keyId = ctx.match[1];
+    const backPage = parseInt(ctx.match[2]);
+
     ctx.answerCbQuery();
+    return renderSingleKey(ctx, keyId, backPage);
 });
 
-// Смена статуса: заблокировать/разблокировать
+// Смена статуса: заблокировать/разблокировать (ФИКС ОШИБКИ ЗДЕСЬ)
 bot.action(/^toggle_block_(.+)_(.+)$/, async (ctx) => {
     if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
     const keyId = ctx.match[1];
@@ -375,10 +380,12 @@ bot.action(/^toggle_block_(.+)_(.+)$/, async (ctx) => {
     await supabase.from('keys').update({ status: newStatus }).eq('id', keyId);
 
     ctx.answerCbQuery(`Статус изменен на: ${newStatus}`);
-    return bot.handleAction(`view_key_${keyId}_${backPage}`, ctx);
+    
+    // Вызываем правильную функцию для обновления этого же экрана
+    return renderSingleKey(ctx, keyId, backPage);
 });
 
-// Сброс HWID для ключа
+// Сброс HWID для ключа (ФИКС ОШИБКИ ЗДЕСЬ)
 bot.action(/^reset_hwid_(.+)_(.+)$/, async (ctx) => {
     if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
     const keyId = ctx.match[1];
@@ -388,7 +395,9 @@ bot.action(/^reset_hwid_(.+)_(.+)$/, async (ctx) => {
     if (error) return ctx.answerCbQuery("Не удалось сбросить HWID.");
 
     ctx.answerCbQuery("HWID успешно очищен!");
-    return bot.handleAction(`view_key_${keyId}_${backPage}`, ctx);
+    
+    // Вызываем правильную функцию для обновления этого же экрана
+    return renderSingleKey(ctx, keyId, backPage);
 });
 
 // Удаление ключа
