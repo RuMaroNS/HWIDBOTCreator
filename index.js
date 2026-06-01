@@ -34,6 +34,15 @@ function generateKey() {
     return `${genPart(4)}-${genPart(4)}-${genPart(4)}-${genPart(4)}`;
 }
 
+// Безопасный ответ на callback-запросы (чтобы бот не падал от таймаутов Telegram)
+async function safeAnswerCb(ctx, text = undefined, options = {}) {
+    try {
+        await ctx.answerCbQuery(text, options);
+    } catch (err) {
+        console.log("⚠️ Игнорируем устаревший клик (timeout/invalid id):", err.message);
+    }
+}
+
 // Главное меню
 const mainMenu = Markup.keyboard([
     ['🔑 Создать ключ HWID', '📝 Создать апдейт'],
@@ -178,7 +187,7 @@ bot.hears(['🔑 Создать ключ HWID', 'создать ключ HWID'],
 // Обработка генерации стандартных ключей
 const timeMaps = { '12h': 12*60, '24h': 24*60, '3d': 3*24*60, '7d': 7*24*60 };
 bot.action(/^gen_(12h|24h|3d|7d)$/, async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
     
     const durationType = ctx.match[1];
     const minutes = timeMaps[durationType];
@@ -206,10 +215,10 @@ bot.action(/^gen_(12h|24h|3d|7d)$/, async (ctx) => {
 
 // Обработка нажатия кнопки "Создать свой график"
 bot.action('gen_custom_prompt', async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
     
     userSessions[ctx.from.id] = 'await_custom_graph';
-    ctx.answerCbQuery();
+    safeAnswerCb(ctx);
     
     return ctx.editMessageText('⚙️ **Режим создания своего графика**\n\n' +
                                'Пришлите сообщение строго в формате:\n' +
@@ -232,8 +241,8 @@ bot.hears(['⚙️ Настройки бота', 'Настройки бота'],
 
 // Просмотр списка админов из базы данных
 bot.action("view_admins_list", async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
-    ctx.answerCbQuery();
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
+    safeAnswerCb(ctx);
 
     const { data: admins, error } = await supabase.from('bot_admins').select('*');
     if (error) return ctx.reply("❌ Не удалось загрузить список администраторов.");
@@ -247,8 +256,8 @@ bot.action("view_admins_list", async (ctx) => {
 });
 
 bot.action("back_to_settings", async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
-    ctx.answerCbQuery();
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
+    safeAnswerCb(ctx);
     ctx.editMessageText("⚙️ **Настройки управления ботом:**", Markup.inlineKeyboard([
         [Markup.button.callback("👥 Список админов", "view_admins_list")],
         [Markup.button.callback("➕ Добавить админа", "add_admin_prompt")]
@@ -256,10 +265,10 @@ bot.action("back_to_settings", async (ctx) => {
 });
 
 bot.action("add_admin_prompt", async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
     userSessions[ctx.from.id] = 'await_admin_input';
     ctx.reply("✉️ Отправьте мне **ID** пользователя или его **Username** (без @), которого хотите сделать администратором:");
-    ctx.answerCbQuery();
+    safeAnswerCb(ctx);
 });
 
 // Нажатие: "📋 Активные ключи HWID"
@@ -317,17 +326,17 @@ async function sendKeysPage(ctx, page, isEdit = true) {
 
 // Переключение страниц
 bot.action(/^page_(.+)$/, async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
     const targetPage = parseInt(ctx.match[1]);
     sendKeysPage(ctx, targetPage, true);
-    ctx.answerCbQuery();
+    safeAnswerCb(ctx);
 });
 
-// Изолированная функция для рендеринга и обновления информации о конкретном ключе
+// Изолированная функция для рендеринга информации о ключе
 async function renderSingleKey(ctx, keyId, backPage) {
     const { data } = await supabase.from('keys').select('*').eq('id', keyId);
     if (!data || data.length === 0) {
-        return ctx.answerCbQuery("Ключ не найден.", { show_alert: true });
+        return safeAnswerCb(ctx, "Ключ не найден.", { show_alert: true });
     }
 
     const k = data[0];
@@ -353,66 +362,61 @@ async function renderSingleKey(ctx, keyId, backPage) {
         [Markup.button.callback("⬅️ Вернуться к списку", `page_${backPage}`)]
     ]);
 
-    // Всегда обновляем текущее инлайн-сообщение без сбоев
     return ctx.editMessageText(details, { parse_mode: 'Markdown', ...actions });
 }
 
 // Просмотр детальной информации о ключе
 bot.action(/^view_key_(.+)_(.+)$/, async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
     const keyId = ctx.match[1];
     const backPage = parseInt(ctx.match[2]);
 
-    ctx.answerCbQuery();
+    safeAnswerCb(ctx);
     return renderSingleKey(ctx, keyId, backPage);
 });
 
-// Смена статуса: заблокировать/разблокировать (ФИКС ОШИБКИ ЗДЕСЬ)
+// Смена статуса: заблокировать/разблокировать
 bot.action(/^toggle_block_(.+)_(.+)$/, async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
     const keyId = ctx.match[1];
     const backPage = parseInt(ctx.match[2]);
 
     const { data: keyData } = await supabase.from('keys').select('status').eq('id', keyId).single();
-    if (!keyData) return ctx.answerCbQuery("Ключ не найден.");
+    if (!keyData) return safeAnswerCb(ctx, "Ключ не найден.");
 
     const newStatus = keyData.status === 'blocked' ? 'active' : 'blocked';
     await supabase.from('keys').update({ status: newStatus }).eq('id', keyId);
 
-    ctx.answerCbQuery(`Статус изменен на: ${newStatus}`);
-    
-    // Вызываем правильную функцию для обновления этого же экрана
+    safeAnswerCb(ctx, `Статус изменен на: ${newStatus}`);
     return renderSingleKey(ctx, keyId, backPage);
 });
 
-// Сброс HWID для ключа (ФИКС ОШИБКИ ЗДЕСЬ)
+// Сброс HWID для ключа
 bot.action(/^reset_hwid_(.+)_(.+)$/, async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
     const keyId = ctx.match[1];
     const backPage = parseInt(ctx.match[2]);
 
     const { error } = await supabase.from('keys').update({ hwid: null }).eq('id', keyId);
-    if (error) return ctx.answerCbQuery("Не удалось сбросить HWID.");
+    if (error) return safeAnswerCb(ctx, "Не удалось сбросить HWID.");
 
-    ctx.answerCbQuery("HWID успешно очищен!");
-    
-    // Вызываем правильную функцию для обновления этого же экрана
+    safeAnswerCb(ctx, "HWID успешно очищен!");
     return renderSingleKey(ctx, keyId, backPage);
 });
 
 // Удаление ключа
 bot.action(/^delete_key_(.+)_(.+)$/, async (ctx) => {
-    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return ctx.answerCbQuery("Нет прав");
+    if (!(await isAdmin(ctx.from.id, ctx.from.username))) return safeAnswerCb(ctx, "Нет прав");
     const keyId = ctx.match[1];
     const backPage = parseInt(ctx.match[2]);
 
     const { error } = await supabase.from('keys').delete().eq('id', keyId);
 
     if (error) {
-        return ctx.answerCbQuery("Не удалось удалить ключ.", { show_alert: true });
+        return safeAnswerCb(ctx, "Не удалось удалить ключ.", { show_alert: true });
     }
 
-    ctx.answerCbQuery("Ключ успешно удален!");
+    safeAnswerCb(ctx, "Ключ успешно удален!");
     sendKeysPage(ctx, backPage, true);
 });
 
